@@ -1,9 +1,10 @@
 # hamamatsu2
 control hamamatsu camera linux or windows
 test on ubuntu 24.04.1 with an Orca flash camera
+
 use visu : https://www.github.com/julienGautier77/visu
 
-use dcamapi4 : 'Copyright (C) 2021-2024 Hamamatsu Photonics K.K.'
+use dcamapi4 : 'Copyright (C) 2021-2024 Hamamatsu Photonics K.K.' https://www.hamamatsu.com/eu/en/product/cameras/software/driver-software/dcam-sdk4.html
 
 
 ## Install LINUX : 
