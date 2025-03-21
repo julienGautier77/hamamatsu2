@@ -6,16 +6,15 @@ Created on Oct 03 2024
 
 pip install git+https://github.com/julienGautier77/visu
 @author: juliengautier
-modified 2024/10/03 
+modified 2025/03/21 
 """
 
 import __init__
-
-
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QHBoxLayout, QWidget
 from PyQt6.QtWidgets import QPushButton, QDockWidget, QMenu, QLayout
 from PyQt6.QtWidgets import QComboBox, QSlider, QLabel, QSpinBox, QProgressBar
 from PyQt6.QtWidgets import QDoubleSpinBox, QGridLayout, QToolButton
+from PyQt6.QtWidgets import QMessageBox
 from PyQt6.QtWidgets import QInputDialog
 from PyQt6 import QtCore
 from PyQt6.QtCore import Qt
@@ -36,7 +35,7 @@ version = __version__
 
 class HAMAMATSU(QWidget):
     
-    signalData = QtCore.pyqtSignal(object)
+    signalData = QtCore.pyqtSignal(object)  # signal emited when receive image
     updateBar_signal = QtCore.pyqtSignal(object)  # signal for update progressbar
 
     def __init__(self, cam=None, confFile='conf.ini', **kwds):
@@ -46,11 +45,12 @@ class HAMAMATSU(QWidget):
         self.progressWin = ProgressScreen(parent=self)
         self.progressWin.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.WindowStaysOnTopHint)
         self.progressWin.show()
-
+        
         p = pathlib.Path(__file__)
         sepa = os.sep
         self.kwds = kwds
         self.isConnected = False
+        self.icon = str(p.parent) + sepa + 'icons'+ sepa
 
         if "confpath" in kwds:
             self.confpath = kwds["confpath"]
@@ -58,12 +58,11 @@ class HAMAMATSU(QWidget):
             self.confpath = None
         
         if self.confpath is None:
-            self.confpath = str(p.parent / confFile) # ini file with global path
+            self.confpath = str(p.parent / confFile)  # ini file with global path
         
         self.conf = QtCore.QSettings(self.confpath, QtCore.QSettings.Format.IniFormat)  # ini file 
         self.kwds["confpath"] = self.confpath
         
-        self.icon = str(p.parent) + sepa+'icons' + sepa
         self.configMotorPath = "./fichiersConfig/"
         self.configMotName = 'configMoteurRSAI.ini'
         self.confMotorPath = self.configMotorPath+self.configMotName
@@ -86,13 +85,13 @@ class HAMAMATSU(QWidget):
         else: 
             self.separate = False
             
-        if "aff" in kwds:  #  affi of Visu
+        if "aff" in kwds:  # affi of Visu
             self.aff = kwds["aff"]
         else: 
             self.aff = "right"
             
-        self.icon = str(p.parent) + sepa+'icons'+sepa
         self.setWindowIcon(QIcon(self.icon+'LOA.png'))
+        self.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='pyqt6')) # qdarkstyle :  black windows style
         self.iconPlay = self.icon+'Play.png'
         self.iconSnap = self.icon+'Snap.png'
         self.iconStop = self.icon+'Stop.png'
@@ -105,7 +104,7 @@ class HAMAMATSU(QWidget):
         self.nbShot = 1
         
         if cam is None:  # si None on prend la première...
-            self.nbcam = 'cam0'
+            self.nbcam = 'camDefault'
         else:
             self.nbcam = cam
 
@@ -137,42 +136,30 @@ class HAMAMATSU(QWidget):
             for i in range(0, n):
                 cam = dcam.Dcam(i)
                 cameraid = cam.dev_getstring(dcam.DCAM_IDSTR.CAMERAID)
-                cameraid = ''.join([car for car in cameraid  if car.isdigit()])  # remove S/N
+                cameraid = ''.join([car for car in cameraid if car.isdigit()])  # remove S/N
                 if self.camID == cameraid:
                     idevice = i
-            print('iii')
+            
             self.cam = dcam.Dcam(idevice)
             self.camOpened = self.cam.dev_open()
             if self.camOpened:
-                model = self.cam.dev_getstring(dcam.DCAM_IDSTR.MODEL)
-                # print('model',model)
+                self.model = self.cam.dev_getstring(dcam.DCAM_IDSTR.MODEL)
                 id = self.cam.dev_getstring(dcam.DCAM_IDSTR.CAMERAID)
-                print('model', model, id)
-                # print('init exposure',self.cam.prop_getvalue(dcam.DCAM_IDPROP.EXPOSURETIME))
+                # print('model', self.model, id)
+                if self.cam.prop_getvalue(dcam.DCAM_IDPROP.SUBARRAYMODE) != 1: # full frame
+                    self.cam.prop_setvalue(dcam.DCAM_IDPROP.SUBARRAYMODE, 1)
+
                 self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGER_MODE, 1)
-                # print('init trigger mode ',self.cam.prop_getvalue(dcam.DCAM_IDPROP.TRIGGER_MODE))
-        
                 self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGERACTIVE, 1)  # Normal
-                # print('init trigger active ',self.cam.prop_getvalue(dcam.DCAM_IDPROP.TRIGGERACTIVE))
-
                 self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGERPOLARITY, 2)  # Rising edge
-                # print('init trigger polarity',self.cam.prop_getvalue(dcam.DCAM_IDPROP.TRIGGERPOLARITY,))
-
                 self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGERSOURCE, 1) # Internal Camera use its own timing
-                # print('init trigger source',self.cam.prop_getvalue(dcam.DCAM_IDPROP.TRIGGERSOURCE))
-
                 self.cam.prop_setvalue(dcam.DCAM_IDPROP.EXPOSURETIME, 0.001*int(self.conf.value(self.nbcam+"/shutter")) )# set cam to  ms
-                # print('now exposure is ',self.cam.prop_getvalue(dcam.DCAM_IDPROP.EXPOSURETIME))
 
                 self.itrig = 0
                 self.sh = int(1000*self.cam.prop_getvalue(dcam.DCAM_IDPROP.EXPOSURETIME))
-                
                 min_exp_time = int(1000*self.cam.prop_getattr(dcam.DCAM_IDPROP.EXPOSURETIME).valuemin)
                 max_exp_time = int(1000*self.cam.prop_getattr(dcam.DCAM_IDPROP.EXPOSURETIME).valuemax)
             
-                # print("min,max exposure time in ms ",min_exp_time,max_exp_time)
-                print('temp:', self.cam.prop_getvalue(dcam.DCAM_IDPROP.SENSORTEMPERATURE), self.cam.prop_getvalue(dcam.DCAM_IDPROP.SENSORTEMPERATURETARGET) )
-                
                 self.isConnected = True
                
         if self.isConnected is True:
@@ -190,8 +177,13 @@ class HAMAMATSU(QWidget):
             self.hSliderShutter.setValue(self.sh)
             self.shutterBox.setValue(self.sh)
             self.tempWidget = TEMPWIDGET(self)
-            self.settingWidget = SETTINGWIDGET(self, visualisation=self.visualisation)
-            self.setWindowTitle(self.ccdName)
+            
+            self.settingWidget = SETTINGWIDGET(cam=self.cam, conf=self.conf,
+                                               nbcam=self.nbcam,
+                                               visualisation=self.visualisation)
+            self.setWindowTitle(self.ccdName + ' v. ' + str(version)+'  ' +
+                                self.model + ' Visu v.'+
+                                self.visualisation.version)
             
         else:
             self.runButton.setEnabled(False)
@@ -212,163 +204,166 @@ class HAMAMATSU(QWidget):
     def setup(self):
         """ user interface definition: 
         """
-        
-        hbox1 = QHBoxLayout()  # horizontal layout pour run snap stop
-        self.sizebuttonMax = 40
-        self.sizebuttonMin = 40
-        self.runButton = QToolButton(selfSETTINGWIDGE)
+        vbox1 = QVBoxLayout() # 
+        hbox1 = QHBoxLayout() # horizontal layout pour run snap stop
+        self.sizebuttonMax = 30
+        self.sizebuttonMin = 30
+
+        self.runButton = QToolButton(self)
         self.runButton.setMaximumWidth(self.sizebuttonMax)
         self.runButton.setMinimumWidth(self.sizebuttonMax)
         self.runButton.setMaximumHeight(self.sizebuttonMax)
         self.runButton.setMinimumHeight(self.sizebuttonMax)
-        self.runButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: transparent ;border-color: green;}""QToolButton:pressed{image: url(%s);background-color: gray ;border-color: gray}"% (self.iconPlay,self.iconPlay) )
+        self.runButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: transparent ;border-color: green;}""QToolButton:pressed{border-image: url(%s);background-color: gray ;border-color: gray}"% (self.iconPlay,self.iconPlay) )
         
         self.snapButton = QToolButton(self)
         self.snapButton.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         menu = QMenu()
-        # menu.addAction('acq',self.oneImage)
         menu.addAction('set nb of shot', self.nbShotAction)
         self.snapButton.setMenu(menu)
         self.snapButton.setMaximumWidth(self.sizebuttonMax)
         self.snapButton.setMinimumWidth(self.sizebuttonMax)
         self.snapButton.setMaximumHeight(self.sizebuttonMax)
         self.snapButton.setMinimumHeight(self.sizebuttonMax)
-        self.snapButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: transparent ;border-color: green;}""QToolButton:pressed{image: url(%s);background-color: gray ;border-color: gray}"% (self.iconSnap,self.iconSnap) )
+        self.snapButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: transparent ;border-color: green;}""QToolButton:pressed{border-image: url(%s);background-color: gray ;border-color: gray}"% (self.iconSnap,self.iconSnap) )
         
         self.stopButton = QToolButton(self)
-        self.stopButton.setMaximumWidth(sSETTINGWIDGEelf.sizebuttonMax)
+        self.stopButton.setMaximumWidth(self.sizebuttonMax)
         self.stopButton.setMinimumWidth(self.sizebuttonMax)
         self.stopButton.setMaximumHeight(self.sizebuttonMax)
         self.stopButton.setMinimumHeight(self.sizebuttonMax)
-        self.stopButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: gray ;border-color: gray;}""QToolButton:pressed{image: url(%s);background-color: gray ;border-color: gray}"% (self.iconStop,self.iconStop) )
+        self.stopButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: gray ;border-color: gray;}""QToolButton:pressed{border-image: url(%s);background-color: gray ;border-color: gray}"% (self.iconStop,self.iconStop) )
         self.stopButton.setEnabled(False)
-      
+        
         hbox1.addWidget(self.runButton)
         hbox1.addWidget(self.snapButton)
-        hbox1.addWidget(self.stopButton)SETTINGWIDGE
-        hbox1.setSizeConstraint(QLayout.SizeConstraint.SetMaximumSize)
-        hbox1.setContentsMargins(0, 20, 0, 10)
-        self.widgetControl = QWidget(self)
+        hbox1.addWidget(self.stopButton)
         
-        self.widgetControl.setLayout(hbox1)
+        hbox1.setSizeConstraint(QLayout.SizeConstraint.SetMaximumSize)  # setFixedSize)#
+        hbox1.setContentsMargins(0, 0, 0, 0)
+        hbox1.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        vbox1.addLayout(hbox1)
+        vbox1.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        vbox1.setContentsMargins(0, 20, 10, 10)
+        
+        self.widgetControl = QWidget(self)
+        self.widgetControl.setLayout(vbox1)
         self.dockControl = QDockWidget(self)
         self.dockControl.setWidget(self.widgetControl)
-        self.dockControl.resize(100, 100)
+        
         self.trigg = QComboBox()
-        self.trigg.setMaximumWidth(80)
+        self.trigg.setMaximumWidth(90)
         self.trigg.addItem('OFF')
         self.trigg.addItem('ON')
-        self.trigg.setStyleSheet('font :bold  10pt;color: white')
-        self.labelTrigger = QLabel('Trigger')
-        self.labelTrigger.setMaximumWidth(70)
-        self.labelTrigger.setStyleSheet('font :bold  8pt')
+        self.trigg.setStyleSheet('font :bold 10pt;color: white')
+        self.labelTrigger = QLabel('Trig')
+        self.labelTrigger.setMaximumWidth(50)
+        # self.labelTrigger.setMinimumHeight(50)
+        self.labelTrigger.setStyleSheet('font :bold  10pt')
         self.itrig = self.trigg.currentIndex()
-        
         hbox2 = QHBoxLayout()
-        hbox2.setSizeConstraint(QLayout.SizeConstraint.SetMaximumSize)
-        hbox2.setContentsMargins(5, 15, 0, 0)
+        hbox2.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        hbox2.setContentsMargins(0, 20, 10, 10)
         hbox2.addWidget(self.labelTrigger)
-        
         hbox2.addWidget(self.trigg)
         self.widgetTrig = QWidget(self)
-        
         self.widgetTrig.setLayout(hbox2)
         self.dockTrig = QDockWidget(self)
         self.dockTrig.setWidget(self.widgetTrig)
         
         self.labelExp = QLabel('Exposure (ms)')
-        self.labelExp.setStyleSheet('font :bold  9pt')
-        self.labelExp.setMaximumWidth(160)
-        self.labelExp.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.labelExp.setStyleSheet('font :bold  10pt')
+        self.labelExp.setMaximumWidth(140)
+        self.labelExp.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.hSliderShutter = QSlider(Qt.Orientation.Horizontal)
-        self.hSliderShutter.setMaximumWidth(80)
+        self.hSliderShutter.setMaximumWidth(60)
         self.shutterBox = QSpinBox()
         self.shutterBox.setStyleSheet('font :bold  8pt')
         self.shutterBox.setMaximumWidth(120)
         
+        self.shutterBox.setMaximum(1500)
+        self.hSliderShutter.setMaximum(1500)
+        
         hboxShutter = QHBoxLayout()
-        hboxShutter.setContentsMargins(5, 0, 0, 0)
+        hboxShutter.setContentsMargins(0, 0, 0, 5)
         hboxShutter.setSpacing(10)
         vboxShutter = QVBoxLayout()
         vboxShutter.setSpacing(0)
-        vboxShutter.addWidget(self.labelExp)#,Qt.AlignLef)
+        vboxShutter.addWidget(self.labelExp)  #
         
         hboxShutter.addWidget(self.hSliderShutter)
         hboxShutter.addWidget(self.shutterBox)
+
         vboxShutter.addLayout(hboxShutter)
         vboxShutter.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
-        vboxShutter.setContentsMargins(5, 5, 0, 0)
+        vboxShutter.setContentsMargins(0, 0, 10, 0)
+        vboxShutter.setSpacing(2)
         
         self.widgetShutter = QWidget(self)
         self.widgetShutter.setLayout(vboxShutter)
         self.dockShutter = QDockWidget(self)
         self.dockShutter.setWidget(self.widgetShutter)
         
-        self.widgetTemp = QWidget(self)
-        hboxTemp = QHBoxLayout()
-        self.tempButton = QPushButton('Temp :')
-        self.tempButton.setMaximumWidth(80)
-        hboxTemp.addWidget(self.tempButton)
-        self.tempBox = QLabel('?')
-        hboxTemp.addWidget(self.tempBox)
-        
-        # self.settingButton=QPushButton('Settings')
-        # vboxTemp.addWidget(self.settingButton)
-        
-        self.widgetTemp .setLayout(hboxTemp)
-        self.dockTemp = QDockWidget(self)
-        self.dockTemp.setWidget(self.widgetTemp)
-        
         hMainLayout = QHBoxLayout()
         
-        if self.light is False:
+        if self.light is False:  # light option : not all the option af visu 
             from visu import SEE
-            self.visualisation = SEE(parent=self, name=self.nbcam, **self.kwds)  # Widget for visualisation and tools  self.confVisu permet d'avoir plusieurs camera et donc plusieurs fichier ini de visualisation
+            self.visualisation = SEE(parent=self, name=self.nbcam, **self.kwds)  ## Widget for visualisation and tools  self.confVisu permet d'avoir plusieurs camera et donc plusieurs fichier ini de visualisation
         else:
             from visu import SEELIGHT
             self.visualisation = SEELIGHT(parent=self, name=self.nbcam, **self.kwds)
-        
-        self.dockTrig.setTitleBarWidget(QWidget())        
-        self.dockControl.setTitleBarWidget(QWidget()) # to avoid tittle
+
+        self.dockTrig.setTitleBarWidget(QWidget())     
+        self.dockControl.setTitleBarWidget(QWidget())  # to avoid tittle
         self.dockShutter.setTitleBarWidget(QWidget())
-        # self.dockGain.setTitleBarWidget(QWidget())
-        self.dockTemp.setTitleBarWidget(QWidget())
-        if self.separate is True:
+        
+        if self.separate is True: # control camera button is not on the menu but in a widget at the left or right of the display screen
             self.dockTrig.setTitleBarWidget(QWidget())
             if self.aff == 'left':
-                self.visualisation.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dockControl)
-                self.visualisation.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dockTrig)
-                self.visualisation.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dockShutter)
-                # self.visualisation.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,self.dockGain)
-                self.visualisation.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,self.dockTemp)
+                self.visualisation.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,self.dockControl)
+                self.visualisation.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,self.dockTrig)
+                self.visualisation.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,self.dockShutter)
+                
             else:
-                self.visualisation.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dockControl)
-                self.visualisation.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dockTrig)
-                self.visualisation.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dockShutter)
-                # self.visualisation.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,self.dockGain)
-                self.visualisation.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dockTemp)
+                self.visualisation.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,self.dockControl)
+                self.visualisation.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,self.dockTrig)
+                self.visualisation.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,self.dockShutter)  
         else:
-        #self.dockControl.setFeatures(QDockWidget.DockWidgetMovable)
-            self.visualisation.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dockControl)
-            self.visualisation.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dockTrig)
-            self.visualisation.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dockShutter)
-            # self.visualisation.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea,self.dockGain)
-            self.visualisation.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dockTemp)
+            self.visualisation.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea,self.dockControl)
+            self.visualisation.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea,self.dockTrig)
+            self.visualisation.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea,self.dockShutter)
             
-        hMainLayout.addWidget(self.visualisation)
-        self.setLayout(hMainLayout)
-        self.setContentsMargins(0, 0, 0, 0)
+        hMainLayout.addWidget(self.visualisation)       
+
+        self.settingButton = QToolButton(self)
+        self.settingButton.setMaximumWidth(self.sizebuttonMax+50)
+        self.settingButton.setMinimumWidth(self.sizebuttonMax+50)
+        self.settingButton.setMaximumHeight(self.sizebuttonMax)
+        self.settingButton.setMinimumHeight(self.sizebuttonMax)
+        self.settingButton.setText('Settings')
+        hbox1.addWidget(self.settingButton)
+
+        self.tempButton = QToolButton(self)
+        self.tempButton.setMaximumWidth(self.sizebuttonMax+40)
+        self.tempButton.setMinimumWidth(self.sizebuttonMax+40)
+        self.tempButton.setMaximumHeight(self.sizebuttonMax)
+        self.tempButton.setMinimumHeight(self.sizebuttonMax)
+        self.tempButton.setText('Temp')
+        hbox1.addWidget(self.tempButton)
+        self.tempBox = QLabel('?')
+        hbox1.addWidget(self.tempBox)
         
         self.setLayout(hMainLayout)
+        self.setContentsMargins(0, 0, 0, 0)
     
     def shutter(self):
         '''set exposure time
         '''
-        self.sh = self.shutterBox.value() # 
-        self.hSliderShutter.setValue((self.sh)) # set value of slider
+        self.sh = self.shutterBox.value()
+        self.hSliderShutter.setValue((self.sh))  # set value of slider
         self.cam.prop_setvalue(dcam.DCAM_IDPROP.EXPOSURETIME,(self.sh)/1000)
-        print('now exposure is ', self.cam.prop_getvalue(dcam.DCAM_IDPROP.EXPOSURETIME),' s')
+        print('now exposure is ', self.cam.prop_getvalue(dcam.DCAM_IDPROP.EXPOSURETIME), ' s')
         time.sleep(0.1)
         
         self.conf.setValue(self.nbcam+"/shutter", float(self.sh))
@@ -381,7 +376,7 @@ class HAMAMATSU(QWidget):
         print('now exposure is ', self.cam.prop_getvalue(dcam.DCAM_IDPROP.EXPOSURETIME),' s')
         self.conf.setValue(self.nbcam+"/shutter", float(self.sh))
     
-    def actionButton(self): 
+    def actionButton(self):
         '''action when button are pressed
         '''
         self.runButton.clicked.connect(self.acquireMultiImage)
@@ -390,13 +385,13 @@ class HAMAMATSU(QWidget):
         self.shutterBox.editingFinished.connect(self.shutter)    
         self.hSliderShutter.sliderReleased.connect(self.mSliderShutter)
         self.trigg.currentIndexChanged.connect(self.TrigA)
-        self.tempButton.clicked.connect(lambda: self.open_widget(self.tempWidget) )
-        # self.settingButton.clicked.connect(lambda:self.open_widget(self.settingWidget) )
+        self.tempButton.clicked.connect(lambda: self.open_widget(self.tempWidget))
+        self.settingButton.clicked.connect(lambda: self.open_widget(self.settingWidget))
         if self.isConnected is True:
             self.threadRunAcq = ThreadRunAcq(self)
             self.threadRunAcq.newDataRun.connect(self.Display)
             self.threadOneAcq = ThreadOneAcq(self)
-            self.threadOneAcq.newDataRun.connect(self.Display)#,QtCore.Qt.DirectConnection)
+            self.threadOneAcq.newDataRun.connect(self.Display)
             self.threadOneAcq.endAcqState.connect(self.stopAcq)
          
     def acquireMultiImage(self):    
@@ -412,7 +407,10 @@ class HAMAMATSU(QWidget):
         self.camIsRunnig = True
         
         # self.threadTemp.stopThreadTemp()
-        
+        for child in self.settingWidget.findChildren(QPushButton):
+            child.setEnabled(False)
+        for child in self.settingWidget.findChildren(QComboBox):
+            child.setEnabled(False)
         self.threadRunAcq.newRun()  # to set stopRunAcq=False
         self.threadRunAcq.start()
        
@@ -428,7 +426,11 @@ class HAMAMATSU(QWidget):
         
         # self.threadTemp.stopThreadTemp()
         self.camIsRunnig = True
-        
+        for child in self.settingWidget.findChildren(QPushButton):
+            child.setEnabled(False)
+        for child in self.settingWidget.findChildren(QComboBox):
+            child.setEnabled(False)
+
         self.threadOneAcq.newRun()  # to set stopRunAcq=False
         self.threadOneAcq.start()
         
@@ -440,7 +442,7 @@ class HAMAMATSU(QWidget):
         if ok:
             self.nbShot = int(nbShot)
             if self.nbShot <= 0:
-               self.nbShot = 1
+                self.nbShot = 1
         else:
             self.nbShot = 1
     
@@ -456,6 +458,10 @@ class HAMAMATSU(QWidget):
         self.stopButton.setEnabled(False)
         self.stopButton.setStyleSheet("QToolButton:!pressed{border-image: url(%s);background-color: gray ;border-color: gray;}""QToolButton:pressed{image: url(%s);background-color: gray ;border-color: gray}"%(self.iconStop,self.iconStop) )
         self.trigg.setEnabled(True)
+        for child in self.settingWidget.findChildren(QPushButton):
+            child.setEnabled(True)
+        for child in self.settingWidget.findChildren(QComboBox):
+            child.setEnabled(True)
         
         # self.threadTemp.stopTemp=False
         # self.threadTemp.start()
@@ -465,9 +471,9 @@ class HAMAMATSU(QWidget):
     # trig la CCD
         self.itrig = self.trigg.currentIndex()
         if self.itrig == 0:
-            self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGERSOURCE,1) 
+            self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGERSOURCE,1)
         if self.itrig == 1:
-            self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGERSOURCE,2) # ETriggerSource.EXTERNAL
+            self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGERSOURCE,2)  # ETriggerSource.EXTERNAL
             print('Trigger ON ')
         # print(self.itrig)
 
@@ -482,7 +488,7 @@ class HAMAMATSU(QWidget):
         
         """ open new widget
         """
-        
+        print(fene.isWinOpen)
         if fene.isWinOpen is False:
             fene.show()
             fene.isWinOpen = True
@@ -503,10 +509,10 @@ class HAMAMATSU(QWidget):
         try:
             self.cam.dev_close()
             dcam.Dcamapi.uninit()
-        except:pass
-        
+        except: pass
+
+
 class ThreadOneAcq(QtCore.QThread):
-    
     '''Second thread for controling one or more  acquisition independtly
     '''
     newDataRun = QtCore.pyqtSignal(object)
@@ -552,8 +558,8 @@ class ThreadOneAcq(QtCore.QThread):
     def stopThreadOneAcq(self):
         self.stopRunAcq = True
         # self.cam.finish()
-        
-        
+
+
 class ThreadRunAcq(QtCore.QThread):
     
     newDataRun = QtCore.pyqtSignal(object)
@@ -582,14 +588,14 @@ class ThreadRunAcq(QtCore.QThread):
                 if self.cam.wait_capevent_frameready(timeout_milisec):
                     data = self.cam.buf_getlastframedata()
                     data = np.rot90(data, -1)
-                    self.newDataRun.emit(data)  
+                    self.newDataRun.emit(data)
                     break
             self.cam.buf_release()
                 
     def stopThreadRunAcq(self):
         self.stopRunAcq = True
-        
-        
+
+
 class ThreadTemperature(QtCore.QThread):
     """
     Thread pour la lecture de la temperature toute les 2 secondes
@@ -637,9 +643,10 @@ class TEMPWIDGET(QWidget):
         max_temp = 0
        
         self.tempVal.setMaximum(max_temp/100)
-        self.tempVal.setMinimum( min_temp/100)
+        self.tempVal.setMinimum(min_temp/100)
         self.tempVal.setValue(self.cam.prop_getvalue(dcam.DCAM_IDPROP.SENSORTEMPERATURE))
         self.tempSet = QPushButton('Set')
+        self.tempSet.setEnabled(False)
         self.hbox = QHBoxLayout()
         self.hbox.addWidget(labelT)
         self.hbox.addWidget(self.tempVal)
@@ -650,108 +657,102 @@ class TEMPWIDGET(QWidget):
           
     def SET(self):
         temp = float(self.tempVal.value())
+        a = self.cam.prop_setvalue(dcam.DCAM_IDPROP.SENSORTEMPERATURETARGET,temp)
         
-        # self.cam.prop_setvalue(dcam.DCAM_IDPROP.SENSORTEMPERATURETARGET,temp)
         tepTarget = self.cam.prop_getvalue(dcam.DCAM_IDPROP.SENSORTEMPERATURETARGET)
-        print('temp target', tepTarget)
+        print('temp target', tepTarget, a)
     
     def closeEvent(self, event):
         """ when closing the window
         """
         self.isWinOpen = False
-        
         time.sleep(0.1)
-        event.accept() 
+        event.accept()
         
         
 class SETTINGWIDGET(QWidget):
     
-    def __init__(self, parent, visualisation=None):
-        
-        super(SETTINGWIDGET, self).__init__()
-        self.parent = parent
-        self.cam = self.parent.cam
-        self.visualisation = visualisation
+    def __init__(self, cam=None, conf=None, parent=None, nbcam=None, visualisation=None):
+        super(SETTINGWIDGET, self).__init__(parent)
         self.isWinOpen = False
-        
-        self.setup()
-        self.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
-        
-        self.actionButton()
+        p = pathlib.Path(__file__)
+        sepa = os.sep
+        self.icon = str(p.parent) + sepa+'icons'+sepa
+        self.parent = parent
+        self.conf = conf
+        self.cam = cam
+        self.nbcam = nbcam
         self.roi1Is = False
-        
-    def setup(self) : 
-        self.dimx = self.cam.sensor_size[0]
-        self.dimy = self.cam.sensor_size[1]
+        self.visualisation = visualisation
+        self.setup()
+        self.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='pyqt6'))
+        self.actionButton()
+
+    def setup(self):
+      
+        self.dimx = 2000  # self.cam.prop_getvalue(dcam.DCAM_IDPROP.IMAGE_WIDTH)
+        self.dimy = 2000  # self.cam.prop_getvalue(dcam.DCAM_IDPROP.IMAGE_HEIGHT)
         self.setWindowIcon(QIcon('./icons/LOA.png'))
         self.setWindowTitle('SETTINGS')
         self.vbox = QVBoxLayout()
-        
-        hboxShutter = QHBoxLayout()
-        shutterLabel = QLabel('ShutterMode')
-        self.shutterMode = QComboBox()
-        self.shutterMode.setMaximumWidth(100)
-        self.shutterMode.addItem('Normal')
-        self.shutterMode.addItem('Always Close')
-        self.shutterMode.addItem('Always Open')
-        self.shutterMode.addItem('Open before trig')
-        
-        hboxShutter.addWidget(shutterLabel)
-        hboxShutter.addWidget(self.shutterMode)
-        self.vbox.addLayout(hboxShutter)
-        
-        hboxFrequency = QHBoxLayout()
-        frequencyLabel = QLabel('Frequency')
-        self.frequency = QComboBox()
-        self.frequency.setMaximumWidth(100)
-        self.frequency.addItem('Normal')
-        self.frequency.addItem('Always Close')
-        self.frequency.addItem('Always Open')
-        hboxFrequency.addWidget(frequencyLabel)
-        hboxFrequency.addWidget(self.frequency)
-        self.vbox.addLayout(hboxFrequency)
+        # hboxShutter = QHBoxLayout()
+        # shutterLabel = QLabel('ShutterMode')
+        # self.shutterMode = QComboBox()
+        # self.shutterMode.setMaximumWidth(100)
+        # self.shutterMode.addItem('Normal')
+        # self.shutterMode.addItem('Always Close')
+        # self.shutterMode.addItem('Always Open')
+        # self.shutterMode.addItem('Open before trig')
+        # hboxShutter.addWidget(shutterLabel)
+        # hboxShutter.addWidget(self.shutterMode)
+        # self.vbox.addLayout(hboxShutter)
         
         hboxROI = QHBoxLayout()
-        
         hbuttonROI = QVBoxLayout()
         self.setROIButton = QPushButton('Set ROI')
         self.setROIFullButton = QPushButton('Set full Frame')
-        self.setROIMouseButton = QPushButton('Mousse')
+        self.setROIMouseButton = QPushButton('Mouse')
         hbuttonROI.addWidget(self.setROIButton)
         hbuttonROI.addWidget(self.setROIFullButton)
         hbuttonROI.addWidget(self.setROIMouseButton)
         hboxROI.addLayout(hbuttonROI)
         
         roiLay = QVBoxLayout()
-        labelROIX = QLabel('ROI Xo')
-        self.ROIX = QDoubleSpinBox(self)
+        labelROIX = QLabel('ROI X0')
+        self.ROIX = QSpinBox(self)
         self.ROIX.setMinimum(0)
-        self.ROIX.setMaximum(self.dimx)
+        self.ROIX.setMaximum(int(self.dimx))
+        self.ROIX.setValue(int(self.conf.value(self.nbcam + "/x0")))
         
-        self.ROIY = QDoubleSpinBox(self)
-        self.ROIY.setMinimum(1)
-        self.ROIY.setMaximum(self.dimy)
-        labelROIY = QLabel('ROI Yo')
+        self.ROIY = QSpinBox(self)
+        self.ROIY.setMinimum(0)
+        self.ROIY.setMaximum(int(self.dimy))
+        self.ROIY.setValue(int(self.conf.value(self.nbcam + "/y0")))
+        labelROIY = QLabel('ROI Y0')
         
         labelROIW = QLabel('ROI Width')
-        self.ROIW = QDoubleSpinBox(self)
-        self.ROIW.setMinimum(0)
-        self.ROIW.setMaximum(self.dimx)     
+        self.ROIW = QSpinBox(self)
+        self.ROIW.setMinimum(100)
+        self.ROIW.setMaximum(int(self.dimx))
+        self.ROIW.setValue(int(self.conf.value(self.nbcam + "/wroi")))
         
         labelROIH = QLabel('ROI Height')
-        self.ROIH = QDoubleSpinBox(self)
-        self.ROIH.setMinimum(1)
-        self.ROIH.setMaximum(self.dimy) 
+        self.ROIH = QSpinBox(self)
+        self.ROIH.setMinimum(100)
+        self.ROIH.setMaximum(int((self.dimy)))
+        self.ROIH.setValue(int(self.conf.value(self.nbcam + "/hroi")))
         
-        labelBinX = QLabel('Bin X')
-        self.BINX = QDoubleSpinBox(self)
-        self.BINX.setMinimum(1)
-        self.BINX.setMaximum(self.dimx) 
-        labelBinY = QLabel('Bin Y ')
-        self.BINY = QDoubleSpinBox(self)
-        self.BINY.setMinimum(1)
-        self.BINY.setMaximum(self.dimy) 
-        
+        labelBinX = QLabel('Binning')
+        self.BINX = QComboBox()
+        self.BINX.setStyleSheet('font :bold 10pt;color: white')
+        self.BINX.addItem('1x1')
+        self.BINX.addItem('2x2')
+        self.BINX.addItem('4x4')
+        self.BINX.addItem('8x8')
+        #  self.BINX.addItem('16x16')
+        #  self.BINX.addItem('1x2')
+        #  self.BINX.addItem('2x4')
+
         grid_layout = QGridLayout()
         grid_layout.addWidget(labelROIX, 0, 0)
         grid_layout.addWidget(self.ROIX, 0, 1)
@@ -763,116 +764,151 @@ class SETTINGWIDGET(QWidget):
         grid_layout.addWidget(self.ROIH, 3, 1)
         grid_layout.addWidget(labelBinX, 4, 0)
         grid_layout.addWidget(self.BINX, 4, 1)
-        grid_layout.addWidget(labelBinY, 5, 0)
-        grid_layout.addWidget(self.BINY, 5, 1)
         
         roiLay.addLayout(grid_layout)
         hboxROI.addLayout(roiLay)
         self.vbox.addLayout(hboxROI)
 
         self.setLayout(self.vbox)
-        
         self.r1 = 100
-        self.roi1 = pg.RectROI([self.dimx/2, self.dimy/2], [2*self.r1, 2*self.r1 ], pen='r', movable=True)
+        self.roi1 = pg.RectROI([self.dimx/2, self.dimy/2], [2*self.r1, 2*self.r1], pen='r', movable=True)
         self.roi1.setPos([self.dimx/2-self.r1, self.dimy/2-self.r1])
         
     def actionButton(self):
         self.setROIButton.clicked.connect(self.roiSet)
         self.setROIFullButton.clicked.connect(self.roiFull)
-        self.frequency.currentIndexChanged.connect(self.setFrequency)
-        self.shutterMode.currentIndexChanged.connect(self.setShutterMode)
-        self.setROIMouseButton.clicked.connect(self.mousseROI)
-        self.roi1.sigRegionChangeFinished.connect(self.moussFinished)
-        
-    def mousseROI(self):
-        
+        #self.shutterMode.currentIndexChanged.connect(self.setShutterMode)
+        self.setROIMouseButton.clicked.connect(self.mouseROI)
+        self.roi1.sigRegionChangeFinished.connect(self.mousFinished)
+        self.ROIX.editingFinished.connect(self.roiChange)
+        self.ROIY.editingFinished.connect(self.roiChange)
+        self.ROIW.editingFinished.connect(self.roiChange)
+        self.ROIH.editingFinished.connect(self.roiChange)
+
+    def mouseROI(self):
         self.visualisation.p1.addItem(self.roi1)
         self.roi1Is = True
-        
-    def moussFinished(self):
+    
+    def roiChange(self):
+        self.ROIX.setValue(round(self.ROIX.value()/100)*100)
+        self.ROIY.setValue(round(self.ROIY.value()/100)*100)
+        self.ROIW.setValue(round(self.ROIW.value()/100)*100)
+        self.ROIH.setValue(round(self.ROIH.value()/100)*100)
+
+    def mousFinished(self):
         
         posRoi = self.roi1.pos()
         sizeRoi = self.roi1.size()
         self.x0 = int(posRoi.x())
         self.wroi = int(sizeRoi.x())
         self.hroi = int(sizeRoi.y())
-        self.y0 = posRoi.y()+sizeRoi.y()
-              
-        self.ROIX.setValue(self.x0)
-        self.ROIY.setValue(self.y0)
-        self.ROIW.setValue(self.wroi)
-        self.ROIH.setValue(self.hroi)
+        self.y0 = int(posRoi.y())  # +sizeRoi.y())
         
+        self.ROIX.setValue(round(self.x0/100)*100)
+        self.ROIY.setValue(round(self.y0/100)*100)
+        self.ROIW.setValue(round(self.wroi/100)*100)
+        self.ROIH.setValue(round(self.hroi/100)*100)
+
     def roiSet(self):
         
         self.x0 = int(self.ROIX.value())
         self.y0 = int(self.ROIY.value())
         self.w = int(self.ROIW.value())
         self.h = int(self.ROIH.value())
-        self.BinX = int(self.BINX.value())
-        self.BinY = int(self.BINY.value())
-        # print('bin',self.cam.bin_x)
-        self.cam.bin_x = self.BinX
-        self.cam.bin_Y = self.BinY
-        # self.cam.set_roi(0, 0, self.dimx,self.dimy)
+        self.binX = int(self.BINX.currentIndex())
         
-        self.cam.set_roi(self.x0, self.dimy-self.y0, self.w, self.h) # ROI start up left pyqtgraph botton left
-        
+        self.y0 = int(abs(self.dimy - (self.y0 + self.h)))
+
+        self.yo = round(self.y0/100)*100
+        self.x0 = round(self.x0/100)*100
+        self.w = round(self.w/100)*100
+        self.h = round(self.h/100)*100
+
+        if self.x0 <= 0:
+            self.x0 = int(0)
+        if self.y0 <= 0:
+
+            self.y0 = int(0)
+        if self.h >= self.dimy:
+            self.h = int(self.dimy)
+        if self.w >= self.dimx:
+            self.w = int(self.dimx)
+
+        self.conf.setValue(self.nbcam + "/x0", self.x0)
+        self.conf.setValue(self.nbcam + "/y0", self.y0)
+        self.conf.setValue(self.nbcam + "/wroi", self.w)
+        self.conf.setValue(self.nbcam + "/hroi", self.h)
+
         if self.roi1Is is True:
             self.visualisation.p1.removeItem(self.roi1)
             self.roi1Is = False
+
+        #self.cam.prop_setvalue(dcam.DCAM_IDPROP.SUBARRAYMODE, 1)
+        #self.cam.prop_setvalue(dcam.DCAM_IDPROP.BINNING, 1)
         
+        self.cam.prop_setvalue(dcam.DCAM_IDPROP.SUBARRAYHSIZE, float(self.w))
+        self.cam.prop_setvalue(dcam.DCAM_IDPROP.SUBARRAYVSIZE, float(self.h))
+        self.cam.prop_setvalue(dcam.DCAM_IDPROP.SUBARRAYHPOS, self.x0)
+        self.cam.prop_setvalue(dcam.DCAM_IDPROP.SUBARRAYVPOS, self.y0)
+
+        if self.binX == 0:
+            self.bin = 1
+        if self.binX == 1:
+            self.bin = 2
+        if self.binX == 2:
+            self.bin = 4
+        if self.binX == 3:
+            self.bin == 8
+        if self.binX == 4:
+            self.bin = 16
+        if self.binX == 5:
+            self.bin == 102
+        if self.binX == 7:
+            self.bin = 204
+        
+        ret = self.cam.prop_setvalue(dcam.DCAM_IDPROP.BINNING, self.bin)
+        if ret is False:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setWindowTitle('Warnning Binnig is not possible ')
+            msg.setText("Change ROI width and height and value must be multiple of 100")
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg.setWindowIcon(QIcon(self.icon+'LOA.png'))
+            tt = msg.exec()
+        
+        if self.cam.prop_getvalue(dcam.DCAM_IDPROP.SUBARRAYMODE):
+
+            self.cam.prop_setvalue(dcam.DCAM_IDPROP.SUBARRAYMODE, 2)  # mode on
+
     def roiFull(self):
-        
-        self.w = self.parent.dimx
-        self.h = self.parent.dimy
+
+        if self.cam.prop_getvalue(dcam.DCAM_IDPROP.SUBARRAYMODE) != 1:  # full frame
+            self.cam.prop_setvalue(dcam.DCAM_IDPROP.SUBARRAYMODE, 1)
+
+        print("full frame")
         self.ROIX.setValue(0)
         self.ROIY.setValue(0)
-        self.ROIW.setValue(self.w)
-        self.ROIH.setValue(self.h)
-        self.BINX.setValue(1)
-        self.BINX.setValue(1)
-        self.cam.bin_x = int(1)
-        self.cam.bin_Y = int(1)
-        self.cam.set_roi(0, 0, self.w, self.h)  # full frame
-        
-        print("fullframe")
+        self.ROIW.setValue(self.dimx)
+        self.ROIH.setValue(self.dimx)
+
         if self.roi1Is is True:
             self.visualisation.p1.removeItem(self.roi1)
             self.roi1Is = False
         
-    def setFrequency(self):
-        """
-        set frequency reading in Mhz
-        """          
-        ifreq = self.freqency.currentIndex()
-        
-        # toDO
-        
-        # if ifreq==0:
-        #      self.cam.setParameter("AdcSpeed",0.1)
-        # if ifreq==0:
-        #      self.cam.setParameter("AdcSpeed",1)
-        # if ifreq==0:
-        #      self.cam.setParameter("AdcSpeed",2)
-             
-        # print('adc frequency(Mhz)',self.cam.getParameter("AdcSpeed"))
-
     def setShutterMode(self):
         """ set shutter mode
         """
         ishut = self.shutterMode.currentIndex()
-        print('shutter')
-        ## todo
-        # if ishut==0:
-        #      self.cam.setParameter("ShutterTimingMode",0)
-        # if ishut==1:
-        #      self.cam.setParameter("ShutterTimingMode",1) 
-        # if ishut==2:
-        #      self.cam.setParameter("ShutterTimingMode",2) 
-        # if ishut==3:
-        #      self.cam.setParameter("ShutterTimingMode",3)
-        #      print('OutputSignal',self.mte.getParameter("ShutterTimingMode"))
+        
+        if ishut == 0:
+             self.cam.setParameter("PicamParameter_ShutterTimingMode",0)
+        if ishut == 1:
+             self.cam.setParameter("PicamParameter_ShutterTimingMode",1) 
+        if ishut == 2:
+             self.cam.setParameter("PicamParameter_ShutterTimingMode",2) 
+        if ishut == 3:
+             self.cam.setParameter("PicamParameter_ShutterTimingMode",3)
+             print('OutputSignal',self.cam.getParameter("ShutterTimingMode"))
              
     def closeEvent(self, event):
         """ when closing the window
@@ -882,8 +918,7 @@ class SETTINGWIDGET(QWidget):
             self.visualisation.p1.removeItem(self.roi1)
             self.roi1Is = False
         time.sleep(0.1)
-        
-        event.accept()
+        event.accept() 
 
 
 class ProgressScreen(QWidget):
@@ -932,4 +967,4 @@ if __name__ == "__main__":
     appli.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='pyqt6'))
     e = HAMAMATSU()
     e.show()
-    appli.exec_()
+    appli.exec()
