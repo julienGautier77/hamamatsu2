@@ -119,14 +119,19 @@ class HAMAMATSU(QWidget):
         self.updateBar_signal.emit([text, 50])
         self.setup()
         text = 'widget loading  ' + self.nbcam + ' ...'
+        self.updateBar_signal.emit([text, 60])
         self.initCam()
-        self.updateBar_signal.emit([text, 75])
-        self.updateBar_signal.emit(['end', 100])
-        self.progressWin.close()
+        
+        text = 'Initializing camera...'
+        self.updateBar_signal.emit([text, 70])
+        
+        
         self.itrig = 0
         self.actionButton()
         self.camIsRunnig = False
-
+        self.updateBar_signal.emit(['Ready!', 100])
+        QtCore.QTimer.singleShot(300, self.progressWin.close)
+    
     def initCam(self):
 
         initOK = dcam.Dcamapi.init()
@@ -154,7 +159,9 @@ class HAMAMATSU(QWidget):
                 self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGERPOLARITY, 2)  # Rising edge
                 self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGERSOURCE, 1) # Internal Camera use its own timing
                 self.cam.prop_setvalue(dcam.DCAM_IDPROP.EXPOSURETIME, 0.001*int(self.conf.value(self.nbcam+"/shutter")) )# set cam to  ms
-
+                print(f'trig gobalbexp value {self.cam.prop_getvalue(dcam.DCAM_IDPROP.TRIGGER_GLOBALEXPOSURE)}')
+                self.cam.prop_setvalue(dcam.DCAM_IDPROP.TRIGGER_GLOBALEXPOSURE,5)
+                print(f'trig gobalbexp value {self.cam.prop_getvalue(dcam.DCAM_IDPROP.TRIGGER_GLOBALEXPOSURE)}')
                 self.itrig = 0
                 self.sh = int(1000*self.cam.prop_getvalue(dcam.DCAM_IDPROP.EXPOSURETIME))
                 min_exp_time = int(1000*self.cam.prop_getattr(dcam.DCAM_IDPROP.EXPOSURETIME).valuemin)
@@ -181,6 +188,9 @@ class HAMAMATSU(QWidget):
             self.settingWidget = SETTINGWIDGET(cam=self.cam, conf=self.conf,
                                                nbcam=self.nbcam,
                                                visualisation=self.visualisation)
+            
+            
+            
             self.setWindowTitle(self.ccdName + ' v. ' + str(version)+'  ' +
                                 self.model + ' Visu v.'+
                                 self.visualisation.version)
@@ -356,7 +366,7 @@ class HAMAMATSU(QWidget):
         
         self.setLayout(hMainLayout)
         self.setContentsMargins(0, 0, 0, 0)
-    
+        print('fin setup')
     def shutter(self):
         '''set exposure time
         '''
@@ -965,6 +975,11 @@ if __name__ == "__main__":
     appli = QApplication(sys.argv)
     # confpathVisu='C:/Users/Salle-Jaune/Desktop/Python/Princeton/confVisuFootPrint.ini'
     appli.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='pyqt6'))
-    e = HAMAMATSU()
-    e.show()
+    try :
+        a= HAMAMATSU()
+        a.show()
+    except Exception as e :
+        print ("error with visu and  RSAI ?",e)
+        w = HAMAMATSU(cam='Spectro',RSAI=False)
+        w.show()
     appli.exec()
